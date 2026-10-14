@@ -16,6 +16,7 @@ final class Natives {
             if (n == null && m.isNative()) n = map.get(k.name + "." + m.name);
             if (n != null) { m.nat = n; m.code = null; }
             else if (m.isNative() && (m.name.equals("registerNatives") || m.name.equals("initIDs"))) m.nat = NOP;
+            else if (m.isNative() && k.name.equals("jdk/net/LinuxSocketOptions") && m.name.endsWith("Supported0")) m.nat = (t, b) -> t.P[b] = 0;
         }
     }
 
@@ -44,6 +45,7 @@ final class Natives {
         Threads.init();
         Loaders.init();
         Nio.init();
+        Net.init();
         Invoke.init();
     }
 }
