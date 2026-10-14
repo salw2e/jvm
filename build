@@ -1,2 +1,2 @@
 #!/bin/sh
-cd "$(dirname "$0")" && rm -rf out && javac --release 17 -nowarn -XDignore.symbol.file -d out $(find src -name '*.java')
+cd "$(dirname "$0")" && rm -rf out && javac --release 17 -nowarn -XDignore.symbol.file -d out/classes $(find src -name '*.java') && jar cf out/jvm.jar -C out/classes .
