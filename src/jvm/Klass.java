@@ -30,7 +30,9 @@ final class Method {
     byte[] code;
     int[] ex = {}, lines = {};
     char ret;
-    boolean intrinsic;
+    boolean intrinsic, nojit;
+    int calls;
+    JIT.Code jit;
     Native nat;
     HashMap<String, byte[]> attrs;
     Klass[] ptypes;
