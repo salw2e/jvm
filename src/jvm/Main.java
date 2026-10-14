@@ -1,12 +1,20 @@
 package jvm;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class Main {
     public static void main(String[] a) throws Exception {
         List<String> args = new ArrayList<>(List.of(a));
-        VM.home = System.getenv().getOrDefault("JVM_JDK", System.getProperty("java.home"));
+        String dflt = "/usr/lib/jvm/java-17-openjdk-amd64";
+        VM.home = System.getenv().getOrDefault("JVM_JDK", Files.isDirectory(Path.of(dflt)) ? dflt : System.getProperty("java.home"));
+        Path release = Path.of(VM.home, "release");
+        if (!Files.exists(release) || !Files.readString(release).contains("JAVA_VERSION=\"17")) {
+            System.err.println("jvm: " + VM.home + " is not a JDK 17, set JVM_JDK to one");
+            System.exit(2);
+        }
         String cp = ".";
         while (!args.isEmpty() && args.get(0).startsWith("-")) {
             String o = args.remove(0);
