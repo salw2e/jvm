@@ -112,6 +112,8 @@ final class Nio {
     }
 
     static int read(T t, int fd, long addr, int len, long pos) throws IOException {
+        Net.Sock s = Net.socks.get(fd);
+        if (s != null) return Net.read(t, s, addr, len);
         byte[] buf = new byte[len];
         int n;
         if (fd == 0) n = IO.IN.read(buf, 0, len);
@@ -122,6 +124,8 @@ final class Nio {
     }
 
     static int write(T t, int fd, long addr, int len, long pos) throws IOException {
+        Net.Sock s = Net.socks.get(fd);
+        if (s != null) return Net.write(t, s, addr, len);
         byte[] buf = new byte[len];
         U.copyMemory(null, addr, buf, BYTES, len);
         if (fd == 1) IO.OUT.write(buf);
@@ -298,14 +302,16 @@ final class Nio {
         Natives.reg(f + "size0", (t, b) -> { RandomAccessFile r = raf(t, fd(t.R[b])); io(t, () -> t.P[b] = r.length()); });
         Natives.reg(f + "lock0", (t, b) -> t.P[b] = 0);
         Natives.reg(f + "release0", Natives.NOP);
-        Natives.reg(f + "preClose0", Natives.NOP);
+        Natives.reg(f + "preClose0", (t, b) -> Net.close(fd(t.R[b])));
         Natives.reg(f + "close0", (t, b) -> {
             int fd = fd(t.R[b]);
+            if (Net.close(fd)) return;
             RandomAccessFile r = IO.files.remove(fd);
             paths.remove(fd);
             if (r != null) io(t, r::close);
         });
         Natives.reg(f + "closeIntFD", (t, b) -> {
+            if (Net.close((int) t.P[b])) return;
             RandomAccessFile r = IO.files.remove((int) t.P[b]);
             if (r != null) io(t, r::close);
         });
@@ -340,7 +346,6 @@ final class Nio {
         Natives.reg(u + "fdLimit", (t, b) -> t.P[b] = 1024);
         Natives.reg(u + "fdVal", (t, b) -> t.P[b] = fd(t.R[b]));
         Natives.reg(u + "setfdVal", (t, b) -> t.R[b].p[t.R[b].k.field("fd").slot] = (int) t.P[b + 1]);
-        Natives.reg(u + "configureBlocking", Natives.NOP);
         Natives.reg(u + "randomBytes", (t, b) -> { new java.security.SecureRandom().nextBytes((byte[]) t.R[b].x); t.P[b] = 1; });
         Natives.reg("sun/nio/ch/NativeThread.init", Natives.NOP);
         Natives.reg("sun/nio/ch/NativeThread.current", (t, b) -> t.P[b] = 0);

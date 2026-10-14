@@ -17,13 +17,13 @@ Building needs JDK 17 or newer. Programs run against the JDK 17 class library, f
 
 ## What works
 
-Each program in `tests/` must print exactly what real Java prints and exit with the same code. Together they cover lambdas and streams, records and sealed types, threads, locks and `wait`/`notify`, reflection, annotations and proxies, exceptions and stack traces, `java.io` and `java.nio.file`, jars and custom class loaders, serialization, `BigInteger`, regex, `java.time`, other locales and charsets.
+Each program in `tests/` must print exactly what real Java prints and exit with the same code. Together they cover lambdas and streams, records and sealed types, threads, locks and `wait`/`notify`, reflection, annotations and proxies, exceptions and stack traces, `java.io` and `java.nio.file`, jars and custom class loaders, serialization, `BigInteger`, regex, `java.time`, other locales and charsets, sockets, the JDK's HTTP server and both HTTP clients.
 
 ## How it works
 
 - `Klass` parses the class file, lays out fields and builds the vtable.
 - `Interp` is one switch over the bytecode. Each thread keeps its operand stacks and locals in two arrays, one for primitives and one for references.
-- The JDK's native methods, a few hundred of them, are rewritten in Java in `Natives`, `Unsafe`, `Reflect`, `IO`, `Nio`, `Threads`, `Loaders` and `Invoke`.
+- The JDK's native methods, a few hundred of them, are rewritten in Java in `Natives`, `Unsafe`, `Reflect`, `IO`, `Nio`, `Net`, `Threads`, `Loaders` and `Invoke`.
 - `invokedynamic` and method handles go through the JDK's own `java.lang.invoke` code. The VM provides what HotSpot provides: member name resolution, `invokeBasic`, `linkTo*` and hidden classes.
 - Boot follows the same steps as HotSpot: `initPhase1`, then the module system, then the system class loader. Application classes are loaded by the JDK's own class loader.
 - Guest objects are host objects, so garbage collection is done by the host JVM. Guest threads are host threads.
@@ -45,10 +45,9 @@ Long-running programs go about twice as fast with `JVM_OPTS="-XX:TieredStopAtLev
 - Interpreter only, no JIT.
 - No bytecode verifier.
 - Weak and soft references are never cleared and finalizers never run.
-- No networking, no child processes, no JNI libraries, no GUI.
+- TCP over IPv4 only, no UDP. No child processes, no JNI libraries, no GUI.
 
 ## Todo
 
-- [ ] Sockets
 - [ ] Faster interpreter
 - [ ] JDK 21 class library
