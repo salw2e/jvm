@@ -1,0 +1,2 @@
+#!/bin/sh
+exec java -XX:-DontCompileHugeMethods -XX:TieredStopAtLevel=1 -XX:+UseSerialGC $JVM_OPTS -cp "$(dirname "$0")/out" jvm.Main "$@"

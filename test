@@ -1,0 +1,16 @@
+#!/bin/sh
+# runs every tests/*.java on real Java and on ./jvm and compares stdout and exit code
+cd "$(dirname "$0")"
+export JVM_JDK=${JVM_JDK:-/usr/lib/jvm/java-17-openjdk-amd64}
+rm -rf tout && mkdir tout
+javac --release 17 -nowarn -d tout tests/*.java || exit 1
+mkdir -p tout/res && echo "from the jar" > tout/res/data.txt && (cd tout && jar cf lib.jar Concat.class res/data.txt) && rm -r tout/res tout/Gone.class
+pass=0; fail=0
+for f in ${*:-tests/*.java}; do
+    n=$(basename "$f" .java)
+    want=$(echo hello-stdin | "$JVM_JDK/bin/java" -cp tout "$n" a b 2>/dev/null; echo "exit $?")
+    got=$(echo hello-stdin | timeout 120 ./jvm -cp tout "$n" a b 2>/dev/null; echo "exit $?")
+    if [ "$want" = "$got" ]; then pass=$((pass + 1)); echo "ok   $n"; else fail=$((fail + 1)); echo "FAIL $n"; fi
+done
+echo "$pass passed, $fail failed"
+[ "$fail" = 0 ]
