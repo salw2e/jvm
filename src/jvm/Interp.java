@@ -4,7 +4,8 @@ import java.lang.reflect.Array;
 
 final class Interp {
     static void invoke(T t, Method m, int b) {
-        if (m.code != null) exec(t, m, b);
+        if (m.jit != null) m.jit.call(t, t.P, t.R, b);
+        else if (m.code != null) exec(t, m, b);
         else VM.callNative(t, m, b);
     }
 
@@ -42,6 +43,7 @@ final class Interp {
                 VM.lock(t, mon);
             }
             if (VM.trace) VM.traceEnter(t, m);
+            if (JIT.THRESHOLD > 0 && !m.nojit && ++m.calls >= JIT.THRESHOLD) { t.top = fend; JIT.compile(t, m); }
         }
         t.top = fend;
         for (;;) {
@@ -310,7 +312,7 @@ final class Interp {
                             int nb = sp - r.argSlots;
                             Klass rk = R[nb].k;
                             Method tm = r.vindex >= 0 ? rk.vtable[r.vindex] : r.isPrivate() || !r.klass.isInterface() ? r : rk.select(r);
-                            if (tm.code != null) exec(t, tm, nb); else VM.callNative(t, tm, nb);
+                            if (tm.jit != null) tm.jit.call(t, P, R, nb); else if (tm.code != null) exec(t, tm, nb); else VM.callNative(t, tm, nb);
                             sp = nb + r.retSlots;
                             t.top = fend;
                             pc += 3;
@@ -322,7 +324,7 @@ final class Interp {
                             if (r == null) r = VM.specialAt(t, k, i);
                             int nb = sp - r.argSlots;
                             if (R[nb] == null) throw new NullPointerException();
-                            if (r.code != null) exec(t, r, nb); else VM.callNative(t, r, nb);
+                            if (r.jit != null) r.jit.call(t, P, R, nb); else if (r.code != null) exec(t, r, nb); else VM.callNative(t, r, nb);
                             sp = nb + r.retSlots;
                             t.top = fend;
                             pc += 3;
@@ -334,7 +336,7 @@ final class Interp {
                             if (r == null) r = VM.methodAt(t, k, i);
                             if (r.klass.state != 2) { VM.init(t, r.klass); t.top = fend; }
                             int nb = sp - r.argSlots;
-                            if (r.code != null) exec(t, r, nb); else VM.callNative(t, r, nb);
+                            if (r.jit != null) r.jit.call(t, P, R, nb); else if (r.code != null) exec(t, r, nb); else VM.callNative(t, r, nb);
                             sp = nb + r.retSlots;
                             t.top = fend;
                             pc += 3;
@@ -347,7 +349,7 @@ final class Interp {
                             int nb = sp - r.argSlots;
                             Klass rk = R[nb].k;
                             Method tm = r.vindex >= 0 ? rk.vtable[r.vindex] : r.isPrivate() ? r : rk.select(r);
-                            if (tm.code != null) exec(t, tm, nb); else VM.callNative(t, tm, nb);
+                            if (tm.jit != null) tm.jit.call(t, P, R, nb); else if (tm.code != null) exec(t, tm, nb); else VM.callNative(t, tm, nb);
                             sp = nb + r.retSlots;
                             t.top = fend;
                             pc += 5;
@@ -465,6 +467,8 @@ final class Interp {
 
     // long loops leave run() and come straight back in, so the host never needs on-stack replacement
     static boolean pause(T t, int fd, int pc, int sp, Obj mon) {
+        Method m = t.fm[fd];
+        if (m.calls < JIT.THRESHOLD) m.calls = JIT.THRESHOLD - 1;
         t.fpc[fd] = pc;
         t.rsp = sp;
         t.rmon = mon;

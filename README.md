@@ -26,28 +26,29 @@ Each program in `tests/` must print exactly what real Java prints and exit with 
 - The JDK's native methods, a few hundred of them, are rewritten in Java in `Natives`, `Unsafe`, `Reflect`, `IO`, `Nio`, `Net`, `Threads`, `Loaders` and `Invoke`.
 - `invokedynamic` and method handles go through the JDK's own `java.lang.invoke` code. The VM provides what HotSpot provides: member name resolution, `invokeBasic`, `linkTo*` and hidden classes.
 - Boot follows the same steps as HotSpot: `initPhase1`, then the module system, then the system class loader. Application classes are loaded by the JDK's own class loader.
+- `JIT` translates methods that are called often into host bytecode, which the host JVM then compiles to machine code. Methods with `try`/`catch` or `synchronized` stay in the interpreter.
 - Guest objects are host objects, so garbage collection is done by the host JVM. Guest threads are host threads.
 
 ## Speed
 
 Measured on a 2-core Haswell VPS.
 
-| | this VM | real Java |
-|---|---|---|
-| Hello world | 0.6 s | 0.05 s |
-| javac compiling this VM | 36 s | 3.6 s |
-| tight loop, warmed up | 24 ns per bytecode | 1.7 ns with `-Xint` |
+| | this VM | real Java | real Java, `-Xint` |
+|---|---|---|---|
+| Hello world | 0.7 s | 0.05 s | |
+| javac compiling this VM | 20 s | 3.6 s | |
+| fib(32), warmed up | 48 ms | 12 ms | 690 ms |
 
-Long-running programs go about twice as fast with `JVM_OPTS="-XX:TieredStopAtLevel=4 -XX:PerMethodTrapLimit=0"`, at the cost of a slower start.
+`JVM_JIT=0` turns the JIT off (javac then takes 41 s, fib 1.8 s). `JVM_JIT=1` compiles every method on its first call, the tests also pass that way.
 
 ## Limits
 
-- Interpreter only, no JIT.
+- No on-stack replacement: a long loop in a method that runs only once, like `main`, stays interpreted.
 - No bytecode verifier.
 - Weak and soft references are never cleared and finalizers never run.
 - TCP over IPv4 only, no UDP. No child processes, no JNI libraries, no GUI.
 
 ## Todo
 
-- [ ] Faster interpreter
+- [ ] JIT for methods with `try`/`catch`
 - [ ] JDK 21 class library
