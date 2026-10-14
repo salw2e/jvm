@@ -60,6 +60,28 @@ final class JIT {
 
     static RuntimeException overflow(T t) { return VM.overflow(t); }
 
+    static void lock(Obj o, T t) {
+        if (o == null) throw new NullPointerException();
+        VM.lock(t, o);
+    }
+
+    static void unlock(Obj o, T t) {
+        if (o == null) throw new NullPointerException();
+        VM.unlock(t, o);
+    }
+
+    static Obj caught(Throwable e, T t, int d, int top) {
+        t.depth = d + 1;
+        t.top = top;
+        if (e instanceof Throw w) return w.ex;
+        if (e instanceof NullPointerException || e instanceof ArrayIndexOutOfBoundsException || e instanceof ArithmeticException
+                || e instanceof NegativeArraySizeException || e instanceof StackOverflowError || e instanceof OutOfMemoryError || e instanceof ClassCastException)
+            return VM.convert(t, e).ex;
+        if (e instanceof RuntimeException r) throw r;
+        if (e instanceof Error r) throw r;
+        throw new RuntimeException(e);
+    }
+
     static int dynamic(T t, Klass k, int i, int sp) {
         t.top = sp + 4;
         return Invoke.dynamic(t, k, i, sp);
@@ -80,7 +102,7 @@ final class JIT {
     // compiling
 
     static boolean eligible(Method m) {
-        return m.code != null && m.ex.length == 0 && (m.flags & 0x20) == 0 && !m.nojit && m.code.length < 4000;
+        return m.code != null && !m.nojit && m.code.length < 16000;
     }
 
     static synchronized void compile(T t, Method m) {
@@ -119,7 +141,8 @@ final class JIT {
         final Buf code = new Buf();
         final int[] map;
         final List<int[]> fixups = new ArrayList<>();
-        final int tl, dl, topl, tmpI, tmpL, tmpF, tmpD, tmpA, spill;
+        final int tl, dl, topl, tmpI, tmpL, tmpF, tmpD, tmpA, monl, spill;
+        final List<int[]> handlers = new ArrayList<>();
         int maxSpill;
 
         Gen(T t, Method m) {
@@ -137,6 +160,7 @@ final class JIT {
             tmpF = n++;
             tmpD = n; n += 2;
             tmpA = n++;
+            monl = n++;
             spill = n;
             synchronized (JIT.class) { names.put(m, name); }
         }
@@ -248,6 +272,21 @@ final class JIT {
 
         void call(String owner, String nm, String desc) { code.op(184).u2(cp.method(owner, nm, desc)); }
 
+        void at(int pc) {
+            loadLocal('A', tl);
+            code.op(180).u2(cp.field("jvm/T", "fpc", "[I"));
+            loadLocal('I', dl);
+            push(pc);
+            code.op(79);
+        }
+
+        void unlockIfSync() {
+            if ((m.flags & 0x20) == 0) return;
+            loadLocal('A', monl);
+            loadLocal('A', tl);
+            call("jvm/JIT", "unlock", "(Ljvm/Obj;Ljvm/T;)V");
+        }
+
         // spill the call's arguments into t.P / t.R at the method's top slot, call, read the result back
         void spillCall(List<String> params, boolean receiver, String ret, Runnable invoke) {
             List<Character> kinds = new ArrayList<>();
@@ -328,6 +367,14 @@ final class JIT {
             loadLocal('A', tl);
             code.op(180).u2(cp.field("jvm/T", "top", "I"));
             storeLocal('I', topl);
+            if ((m.flags & 0x20) != 0) {
+                if (m.isStatic()) getConst(VM.mirror(k), "Ljvm/Obj;"); else loadLocal('A', 0);
+                code.op(89);
+                storeLocal('A', monl);
+                loadLocal('A', tl);
+                call("jvm/JIT", "lock", "(Ljvm/Obj;Ljvm/T;)V");
+            }
+            int bodyStart = code.len;
 
             for (int pc = 0; pc < c.length; ) {
                 map[pc] = code.len;
@@ -400,6 +447,7 @@ final class JIT {
                         }
                     }
                     case 172, 173, 174, 175, 176, 177 -> {
+                        unlockIfSync();
                         loadLocal('A', tl);
                         loadLocal('I', dl);
                         code.op(181).u2(cp.field("jvm/T", "depth", "I"));
@@ -426,11 +474,12 @@ final class JIT {
                         Method r = op == 183 ? VM.specialAt(t, k, i) : VM.methodAt(t, k, i);
                         len = op == 185 ? 5 : 3;
                         String d = r.desc;
-                        boolean direct = op == 184 && !r.intrinsic && r.code != null && r.ex.length == 0 && (r.flags & 0x20) == 0;
+                        boolean direct = op == 184 && !r.intrinsic && r.code != null;
                         if (op == 184 && r.klass.state != Klass.INITED) direct = false;
                         if (direct && r != m && r.jit == null) compile(t, r);
                         String target;
                         synchronized (JIT.class) { target = r == m ? name : r.jit != null ? names.get(r) : null; }
+                        at(pc);
                         if (direct && target != null) {
                             loadLocal('A', tl);
                             call(target, "m", hostDescOf(r));
@@ -451,6 +500,7 @@ final class JIT {
                         String d = k.utf[k.cb[k.cb[i]]];
                         List<String> ps = Klass.params(d);
                         int slots = Klass.argSlots(d);
+                        at(pc);
                         spillCall(ps, false, d.substring(d.indexOf(')') + 1), () -> {
                             loadLocal('A', tl);
                             getConst(k, "Ljvm/Klass;");
@@ -463,13 +513,15 @@ final class JIT {
                         });
                         len = 5;
                     }
-                    case 187 -> { loadLocal('A', tl); getConst(VM.klassAt(t, k, u2(c, pc + 1)), "Ljvm/Klass;"); call("jvm/JIT", "alloc", "(Ljvm/T;Ljvm/Klass;)Ljvm/Obj;"); len = 3; }
+                    case 187 -> { at(pc); loadLocal('A', tl); getConst(VM.klassAt(t, k, u2(c, pc + 1)), "Ljvm/Klass;"); call("jvm/JIT", "alloc", "(Ljvm/T;Ljvm/Klass;)Ljvm/Obj;"); len = 3; }
                     case 188 -> { push(c[pc + 1]); call("jvm/JIT", "newarray", "(II)Ljvm/Obj;"); len = 2; }
                     case 189 -> { getConst(VM.klassAt(t, k, u2(c, pc + 1)), "Ljvm/Klass;"); call("jvm/JIT", "anewarray", "(ILjvm/Klass;)Ljvm/Obj;"); len = 3; }
                     case 190 -> call("jvm/JIT", "len", "(Ljvm/Obj;)I");
-                    case 191 -> { call("jvm/JIT", "athrow", "(Ljvm/Obj;)Ljava/lang/RuntimeException;"); code.op(191); }
+                    case 191 -> { at(pc); call("jvm/JIT", "athrow", "(Ljvm/Obj;)Ljava/lang/RuntimeException;"); code.op(191); }
                     case 192 -> { loadLocal('A', tl); getConst(VM.klassAt(t, k, u2(c, pc + 1)), "Ljvm/Klass;"); call("jvm/JIT", "checkcast", "(Ljvm/Obj;Ljvm/T;Ljvm/Klass;)Ljvm/Obj;"); len = 3; }
                     case 193 -> { getConst(VM.klassAt(t, k, u2(c, pc + 1)), "Ljvm/Klass;"); call("jvm/JIT", "isInstance", "(Ljvm/Obj;Ljvm/Klass;)I"); len = 3; }
+                    case 194 -> { loadLocal('A', tl); call("jvm/JIT", "lock", "(Ljvm/Obj;Ljvm/T;)V"); }
+                    case 195 -> { loadLocal('A', tl); call("jvm/JIT", "unlock", "(Ljvm/Obj;Ljvm/T;)V"); }
                     case 196 -> {
                         int sub = c[pc + 1] & 0xff, l = local(u2(c, pc + 2));
                         if (sub == 132) { code.op(196).op(132).u2(l).u1(c[pc + 4]).u1(c[pc + 5]); len = 6; }
@@ -484,6 +536,40 @@ final class JIT {
                 }
                 pc += len;
                 if (code.len > 60000) throw new Bail("too big");
+            }
+            map[c.length] = code.len;
+            int[] ex = m.ex;
+            for (int i = 0; i < ex.length; i += 4)
+                for (int j = i + 4; j < ex.length; j += 4) {
+                    boolean disjoint = ex[j + 1] <= ex[i] || ex[j] >= ex[i + 1], encloses = ex[j] <= ex[i] && ex[j + 1] >= ex[i + 1];
+                    if (!disjoint && !encloses) throw new Bail("overlapping handlers");
+                }
+            for (int i = 0; i < ex.length; i += 4) {
+                handlers.add(new int[]{map[ex[i]], map[ex[i + 1]], code.len});
+                loadLocal('A', tl);
+                loadLocal('I', dl);
+                loadLocal('I', topl);
+                call("jvm/JIT", "caught", "(Ljava/lang/Throwable;Ljvm/T;II)Ljvm/Obj;");
+                for (int j = i; j < ex.length; j += 4) {
+                    if (j != i && !(ex[j] <= ex[i] && ex[j + 1] >= ex[i + 1])) continue;
+                    if (ex[j + 3] == 0) { branch(167, ex[j + 2]); break; }
+                    code.op(89);
+                    getConst(VM.klassAt(t, k, ex[j + 3]), "Ljvm/Klass;");
+                    call("jvm/JIT", "isInstance", "(Ljvm/Obj;Ljvm/Klass;)I");
+                    int skip2 = code.len;
+                    code.op(153).u2(0);
+                    branch(167, ex[j + 2]);
+                    code.patch2(skip2 + 1, code.len - skip2);
+                }
+                call("jvm/JIT", "athrow", "(Ljvm/Obj;)Ljava/lang/RuntimeException;");
+                code.op(191);
+            }
+            if ((m.flags & 0x20) != 0) {
+                handlers.add(new int[]{bodyStart, code.len, code.len});
+                storeLocal('A', tmpA);
+                unlockIfSync();
+                loadLocal('A', tmpA);
+                code.op(191);
             }
             for (int[] f : fixups) {
                 int off = map[f[2]] - f[0];
@@ -573,18 +659,20 @@ final class JIT {
             o.u2(3);
             o.u2(0x0001).u2(iName).u2(iDesc).u2(1);
             byte[] ic = {42, (byte) 183, (byte) (initRef >> 8), (byte) initRef, (byte) 177};
-            codeAttr(o, codeA, ic, 1, 1);
+            codeAttr(o, codeA, ic, 1, 1, List.of());
             o.u2(0x0009).u2(mName).u2(mDesc).u2(1);
-            codeAttr(o, codeA, main, m.maxStack + 8, spill + maxSpill + 2);
+            codeAttr(o, codeA, main, m.maxStack + 8, spill + maxSpill + 2, handlers);
             o.u2(0x0001).u2(bName).u2(bDesc).u2(1);
-            codeAttr(o, codeA, br, m.argSlots + 8, 7);
+            codeAttr(o, codeA, br, m.argSlots + 8, 7, List.of());
             o.u2(0);
             synchronized (Gen.class) { pending.put(name.replace('/', '.'), consts); }
             return o.bytes();
         }
 
-        static void codeAttr(Buf o, int codeA, byte[] c, int stack, int locals) {
-            o.u2(codeA).u4(12 + c.length).u2(stack).u2(locals).u4(c.length).raw(c).u2(0).u2(0);
+        static void codeAttr(Buf o, int codeA, byte[] c, int stack, int locals, List<int[]> ex) {
+            o.u2(codeA).u4(12 + c.length + ex.size() * 8).u2(stack).u2(locals).u4(c.length).raw(c).u2(ex.size());
+            for (int[] e : ex) o.u2(e[0]).u2(e[1]).u2(e[2]).u2(0);
+            o.u2(0);
         }
     }
 

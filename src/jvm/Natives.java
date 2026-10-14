@@ -100,7 +100,7 @@ final class Lang {
         Natives.reg("java/lang/Runtime.maxMemory", (t, b) -> t.P[b] = Runtime.getRuntime().maxMemory());
         Natives.reg("java/lang/Runtime.gc", (t, b) -> System.gc());
         Natives.reg("java/lang/Shutdown.beforeHalt", Natives.NOP);
-        Natives.reg("java/lang/Shutdown.halt0", (t, b) -> Runtime.getRuntime().halt((int) t.P[b]));
+        Natives.reg("java/lang/Shutdown.halt0", (t, b) -> System.exit((int) t.P[b]));
 
         Natives.reg("java/lang/Float.floatToRawIntBits", Natives.NOP);
         Natives.reg("java/lang/Float.intBitsToFloat", Natives.NOP);

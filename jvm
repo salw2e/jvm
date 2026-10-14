@@ -1,2 +1,3 @@
 #!/bin/sh
-exec java -XX:-DontCompileHugeMethods -XX:TieredStopAtLevel=1 -XX:+UseSerialGC $JVM_OPTS -cp "$(dirname "$0")/out" jvm.Main "$@"
+d="$(dirname "$0")/out"
+exec java -XX:-DontCompileHugeMethods -XX:TieredStopAtLevel=1 -XX:+UseSerialGC -XX:+IgnoreUnrecognizedVMOptions -XX:+AutoCreateSharedArchive -XX:SharedArchiveFile="$d/jvm.jsa" -Xlog:cds=off -Xlog:cds+dynamic=off $JVM_OPTS -cp "$d/jvm.jar" jvm.Main "$@"
